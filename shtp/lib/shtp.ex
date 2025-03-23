@@ -109,9 +109,81 @@ defmodule Shtp.Shtp do
 
     IO.inspect({message_length, seq, report_id}, label: "length, seq, report-id: ")
 
-    # equence = List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1))
+    # sequence = List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1))
+    #
+    Process.sleep(100)
+
+    # start accelerometer reporting
+    I2C.write(i2c, address, [
+      0x15,
+      0x00,
+      0x02,
+      0x00,
+      0xFD,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x60,
+      0xEA,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00
+    ])
+
+    # start reader
+    Process.send_after(self(), :reader, 100)
 
     {:noreply, %{state | sequence: sequence}}
+  end
+
+  @impl GenServer
+  def handle_info(:reader, %{i2c: i2c, address: address, sequence: sequence} = state) do
+    with {:ok, data} <- I2C.read(i2c, address, 255) do
+      <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, message::binary>> = data
+
+      # If cont bit 1, move on we only care about the first entry, if channel != sensor report, not a measurement
+      if cont_bit == 1 or chan != 3 do
+        IO.inspect(chan, label: "Not a good message")
+        IO.inspect(message)
+        Process.send_after(self(), :reader, 100)
+        {:noreply, state}
+      else
+        IO.inspect("Good message")
+        <<timestamp::binary-5, measurements::binary>> = message
+
+        <<id::8, sequence::8, status::2, delay::unsigned-little-14,
+          raw_x::signed-little-integer-16, raw_y::signed-little-integer-16,
+          raw_z::signed-little-integer-16, trash::binary>> = measurements
+
+        IO.inspect({raw_x / 256, raw_y / 256, raw_z / 256, label: "acceleration measurements"})
+
+        Process.send_after(self(), :reader, 100)
+        {:noreply, state}
+      end
+    else
+      # If read errors out, try again later
+      _ ->
+        Process.send_after(self(), :reader, 100)
+        {:noreply, state}
+    end
   end
 
   def reset_device(i2c, address) do
