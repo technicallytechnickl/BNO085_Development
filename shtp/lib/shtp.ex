@@ -8,6 +8,7 @@ defmodule Shtp.Shtp do
   import Bitwise
 
   alias Circuits.I2C
+  alias Circuits.GPIO
 
   # TODO: Generalize to not just BNO08X
 
@@ -70,7 +71,8 @@ defmodule Shtp.Shtp do
   defstruct i2c: @default_i2c_bus_name,
             address: 0x00,
             shtp_data_length: 128,
-            sequence: [0, 0, 0, 0, 0, 0]
+            sequence: [0, 0, 0, 0, 0, 0],
+            gpio: 0
 
   def start_link(name \\ "generic", opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: :"__MODULE__:#{name}")
@@ -84,6 +86,7 @@ defmodule Shtp.Shtp do
     state = %__MODULE__{}
 
     {:ok, i2c} = I2C.open(bus_name)
+
     {:ok, %{state | i2c: i2c, address: address}, {:continue, :startup}}
   end
 
@@ -91,6 +94,8 @@ defmodule Shtp.Shtp do
   def handle_continue(:startup, %{i2c: i2c, address: address, sequence: sequence} = state) do
     reset_device(i2c, address)
 
+    {:ok, gpio} = GPIO.open("GPIO4", :input)
+    GPIO.set_interrupts(gpio, :falling)
     # Where should sequence counting be handled? ETS?
     data_to_write =
       produce_id_request(Enum.at(sequence, 2))
@@ -149,9 +154,46 @@ defmodule Shtp.Shtp do
     ])
 
     # start reader
-    Process.send_after(self(), :reader, 100)
+    # Process.send_after(self(), :reader, 100)
 
-    {:noreply, %{state | sequence: sequence}}
+    {:noreply, %{state | sequence: sequence, gpio: gpio}}
+  end
+
+  @impl GenServer
+  def handle_info(
+        {:circuits_gpio, pin, timestamp, value},
+        %{i2c: i2c, address: address, sequence: sequence, gpio: gpio} = state
+      ) do
+    with {:ok, data} <- I2C.read(i2c, address, 255) do
+      <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, message::binary>> = data
+
+      # If cont bit 1, move on we only care about the first entry, if channel != sensor report, not a measurement
+      cond do
+        cont_bit == 1 or chan != 3 ->
+          IO.inspect(chan, label: "Pin Not a good message")
+          IO.inspect(message)
+          {:noreply, state}
+
+        len_lsb == 0 and len_msb == 0 ->
+          {:noreply, state}
+
+        true ->
+          <<timestamp::binary-5, measurements::binary>> = message
+
+          <<id::8, sequence::8, status::2, delay::unsigned-little-14,
+            raw_x::signed-little-integer-16, raw_y::signed-little-integer-16,
+            raw_z::signed-little-integer-16, trash::binary>> = measurements
+
+          IO.inspect(
+            {raw_x / 256, raw_y / 256, raw_z / 256, label: "Pin acceleration measurements"}
+          )
+
+          {:noreply, state}
+      end
+    else
+      # If read errors out, try again later
+      _ -> {:noreply, state}
+    end
   end
 
   @impl GenServer
