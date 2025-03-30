@@ -67,12 +67,13 @@ defmodule Shtp.Shtp do
   # Defaults for rPi zero 2 and BNO086
   @default_i2c_address 0x4B
   @default_i2c_bus_name "i2c-1"
+  @default_interrupt_gpio "GPIO4"
 
   defstruct i2c: @default_i2c_bus_name,
             address: 0x00,
             shtp_data_length: 128,
             sequence: [0, 0, 0, 0, 0, 0],
-            gpio: 0
+            gpio_pin: @default_interrupt_gpio
 
   def start_link(name \\ "generic", opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: :"__MODULE__:#{name}")
@@ -82,21 +83,27 @@ defmodule Shtp.Shtp do
   def init(opts) do
     bus_name = opts[:bus_name] || @default_i2c_bus_name
     address = opts[:address] || @default_i2c_address
+    gpio_pin = opts[:gpio_pin] || @default_interrupt_gpio
 
     state = %__MODULE__{}
 
     {:ok, i2c} = I2C.open(bus_name)
 
-    {:ok, %{state | i2c: i2c, address: address}, {:continue, :startup}}
+    {:ok, %{state | i2c: i2c, address: address, gpio_pin: gpio_pin}, {:continue, :startup}}
   end
 
   @impl GenServer
-  def handle_continue(:startup, %{i2c: i2c, address: address, sequence: sequence} = state) do
+  def handle_continue(
+        :startup,
+        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio_pin} = state
+      ) do
     reset_device(i2c, address)
 
-    {:ok, gpio} = GPIO.open("GPIO4", :input)
+    {:ok, gpio} = GPIO.open(gpio_pin, :input)
     GPIO.set_interrupts(gpio, :falling)
+
     # Where should sequence counting be handled? ETS?
+
     data_to_write =
       produce_id_request(Enum.at(sequence, 2))
       |> Enum.map(fn x -> if not is_binary(x), do: <<x::8-unsigned-little-integer>>, else: x end)
@@ -119,50 +126,52 @@ defmodule Shtp.Shtp do
     Process.sleep(100)
 
     # start accelerometer reporting
-    I2C.write(i2c, address, [
-      0x15,
-      0x00,
-      0x02,
-      0x00,
-      0xFD,
-      0x01,
-      0x00,
-      0x00,
-      0x00,
-      0x60,
-      0xEA,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00
-    ])
+    Accelerometer.start(i2c, address, 0, 60000)
+
+    # I2C.write(i2c, address, [
+    #   0x15,
+    #   0x00,
+    #   0x02,
+    #   0x00,
+    #   0xFD,
+    #   0x01,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x60,
+    #   0xEA,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00
+    # ])
 
     # start reader
     # Process.send_after(self(), :reader, 100)
 
-    {:noreply, %{state | sequence: sequence, gpio: gpio}}
+    {:noreply, %{state | sequence: sequence, gpio_pin: gpio}}
   end
 
   @impl GenServer
   def handle_info(
         {:circuits_gpio, pin, timestamp, value},
-        %{i2c: i2c, address: address, sequence: sequence, gpio: gpio} = state
+        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
       ) do
     with {:ok, data} <- I2C.read(i2c, address, 255) do
       <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, message::binary>> = data
@@ -194,6 +203,79 @@ defmodule Shtp.Shtp do
       # If read errors out, try again later
       _ -> {:noreply, state}
     end
+  end
+
+  @impl GenServer
+  def handle_cast(
+        {:start_acc, freq},
+        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
+      ) do
+    I2C.write(i2c, address, [
+      0x15,
+      0x00,
+      0x02,
+      0x00,
+      0xFD,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      <<96, 234, 0, 0>>,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00
+    ])
+
+    # I2C.write(i2c, address, [
+    #   0x15,
+    #   0x00,
+    #   0x02,
+    #   0x00,
+    #   0xFD,
+    #   0x01,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x60,
+    #   0xEA,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00,
+    #   0x00
+    # ])
+
+    {:noreply, state}
   end
 
   @impl GenServer
