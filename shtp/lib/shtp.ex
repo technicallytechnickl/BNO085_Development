@@ -125,46 +125,6 @@ defmodule Shtp.Shtp do
     #
     Process.sleep(100)
 
-    # start accelerometer reporting
-    Accelerometer.start(i2c, address, 0, 60000)
-
-    # I2C.write(i2c, address, [
-    #   0x15,
-    #   0x00,
-    #   0x02,
-    #   0x00,
-    #   0xFD,
-    #   0x01,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x60,
-    #   0xEA,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00
-    # ])
-
-    # start reader
-    # Process.send_after(self(), :reader, 100)
-
     {:noreply, %{state | sequence: sequence, gpio_pin: gpio}}
   end
 
@@ -176,6 +136,9 @@ defmodule Shtp.Shtp do
     with {:ok, data} <- I2C.read(i2c, address, 255) do
       <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, message::binary>> = data
 
+      <<timestamp::binary-5, id::8, sequence::8, status::2, delay::unsigned-little-14,
+        measurements::binary>> = message
+
       # If cont bit 1, move on we only care about the first entry, if channel != sensor report, not a measurement
       cond do
         cont_bit == 1 or chan != 3 ->
@@ -183,22 +146,23 @@ defmodule Shtp.Shtp do
           IO.inspect(message)
           {:noreply, state}
 
-        len_lsb == 0 and len_msb == 0 ->
-          {:noreply, state}
-
-        true ->
-          <<timestamp::binary-5, measurements::binary>> = message
-
-          <<id::8, sequence::8, status::2, delay::unsigned-little-14,
-            raw_x::signed-little-integer-16, raw_y::signed-little-integer-16,
-            raw_z::signed-little-integer-16, trash::binary>> = measurements
+        chan == 3 and id == 1 ->
+          {raw_x, raw_y, raw_z} = Accelerometer.parse_message(measurements)
 
           IO.inspect(
-            {raw_x / 256, raw_y / 256, raw_z / 256, label: "Pin acceleration measurements"}
+            {raw_x / 256, raw_y / 256, raw_z / 256,
+             ((raw_x / 256) ** 2 + (raw_y / 256) ** 2 + (raw_z / 256) ** 2) ** 0.5, status},
+            label: "Acceleration"
           )
 
-          {:noreply, state}
+        len_lsb == 0 and len_msb == 0 ->
+          IO.inspect("zero length")
+
+        true ->
+          IO.inspect(message, label: "Something Else")
       end
+
+      {:noreply, state}
     else
       # If read errors out, try again later
       _ -> {:noreply, state}
@@ -210,72 +174,9 @@ defmodule Shtp.Shtp do
         {:start_acc, freq},
         %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
       ) do
-    I2C.write(i2c, address, [
-      0x15,
-      0x00,
-      0x02,
-      0x00,
-      0xFD,
-      0x01,
-      0x00,
-      0x00,
-      0x00,
-      <<96, 234, 0, 0>>,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00
-    ])
-
-    # I2C.write(i2c, address, [
-    #   0x15,
-    #   0x00,
-    #   0x02,
-    #   0x00,
-    #   0xFD,
-    #   0x01,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x60,
-    #   0xEA,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00
-    # ])
-
-    {:noreply, state}
+    # start accelerometer reporting
+    Accelerometer.start(i2c, address, Enum.at(sequence, 2), freq)
+    {:noreply, %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1)}}
   end
 
   @impl GenServer

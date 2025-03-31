@@ -28,38 +28,16 @@ defmodule Accelerometer do
 
     IO.inspect(message)
     I2C.write(i2c, address, message)
-    # I2C.write(i2c, address, [
-    #   0x15,
-    #   0x00,
-    #   0x02,
-    #   0x00,
-    #   0xFD,
-    #   0x01,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   <<96, 234, 0, 0>>,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00,
-    #   0x00
-    # ])
   end
 
-  def stop() do
+  def stop(i2c, address, sequence) do
+    start(i2c, address, sequence, 0)
+  end
+
+  def parse_message(message) do
+    <<raw_x::signed-little-integer-16, raw_y::signed-little-integer-16,
+      raw_z::signed-little-integer-16, _trash::binary>> = message
+
+    {raw_x, raw_y, raw_z}
   end
 end
