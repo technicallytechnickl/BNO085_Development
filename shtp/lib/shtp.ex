@@ -43,17 +43,17 @@ defmodule Shtp.Shtp do
   @report_linear_acceleration 0x04
   @report_rotation_vector 0x05
   @report_gravity 0x06
-  @report_game_rotation_vector 0x08
-  @report_geomagnetic_rotation_vector 0x09
-  @report_gyro_integrated_rotation_vector 0x2A
-  @report_tap_detector 0x10
-  @report_step_counter 0x11
-  @report_stability_classifier 0x13
+  # @report_game_rotation_vector 0x08
+  # @report_geomagnetic_rotation_vector 0x09
+  # @report_gyro_integrated_rotation_vector 0x2A
+  # @report_tap_detector 0x10
+  # @report_step_counter 0x11
+  # @report_stability_classifier 0x13
   @report_raw_accelerometer 0x14
   @report_raw_gyroscope 0x15
   @report_raw_magnetometer 0x16
-  @report_personal_activity_classifier 0x1E
-  @report_ar_vr_stabilized_rotation_vector 0x28
+  # @report_personal_activity_classifier 0x1E
+  # @report_ar_vr_stabilized_rotation_vector 0x28
 
   # BNO8X Specific Channels
   # May need to move this to BNO086
@@ -73,7 +73,16 @@ defmodule Shtp.Shtp do
             address: 0x00,
             shtp_data_length: 128,
             sequence: [0, 0, 0, 0, 0, 0],
-            gpio_pin: @default_interrupt_gpio
+            gpio_pin: @default_interrupt_gpio,
+            accelerometer: nil,
+            raw_accelerometer: nil,
+            linear_acceleration: nil,
+            gravity: nil,
+            raw_gyroscope: nil,
+            gyroscope: nil,
+            raw_magnetometer: nil,
+            magnetic_field: nil,
+            rotation_vector: nil
 
   def start_link(name \\ "generic", opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: :"__MODULE__:#{name}")
@@ -146,13 +155,86 @@ defmodule Shtp.Shtp do
           IO.inspect(message)
           {:noreply, state}
 
-        chan == 3 and id == 1 ->
-          {raw_x, raw_y, raw_z} = Accelerometer.parse_message(measurements)
+        chan == 3 and id == @report_accelerometer ->
+          {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
+          state = %{state | accelerometer: {x, y, z}}
 
           IO.inspect(
-            {raw_x / 256, raw_y / 256, raw_z / 256,
-             ((raw_x / 256) ** 2 + (raw_y / 256) ** 2 + (raw_z / 256) ** 2) ** 0.5, status},
+            {x, y, z, (x ** 2 + y ** 2 + z ** 2) ** 0.5, status},
             label: "Acceleration"
+          )
+
+        chan == 3 and id == @report_raw_accelerometer ->
+          {x, y, z} = Sensors.parse_message(:raw_accelerometer, measurements)
+          state = %{state | raw_accelerometer: {x, y, z}}
+
+          IO.inspect(
+            {x, y, z, status},
+            label: "Raw Acceleration"
+          )
+
+        chan == 3 and id == @report_linear_acceleration ->
+          {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
+          state = %{state | linear_acceleration: {x, y, z}}
+
+          IO.inspect(
+            {x, y, z, status},
+            label: "Linear Acceleration"
+          )
+
+        chan == 3 and id == @report_gravity ->
+          {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
+          state = %{state | gravity: {x, y, z}}
+
+          IO.inspect(
+            {x, y, z, status},
+            label: "Gravity"
+          )
+
+        chan == 3 and id == @report_raw_gyroscope ->
+          {x, y, z, temp} = Sensors.parse_message(:raw_gyroscope, measurements)
+          state = %{state | raw_gyroscope: {x, y, z, temp}}
+
+          IO.inspect(
+            {x, y, z, status, temp},
+            label: "Raw Gyroscope"
+          )
+
+        chan == 3 and id == @report_gyroscope ->
+          {x, y, z} = Sensors.parse_message(:gyroscope, measurements)
+          state = %{state | gyroscope: {x, y, z}}
+
+          IO.inspect(
+            {x, y, z, status},
+            label: "Gyroscope"
+          )
+
+        ## skipped uncalibrated gyroscope
+        chan == 3 and id == @report_raw_magnetometer ->
+          {x, y, z} = Sensors.parse_message(:raw_magnetometer, measurements)
+          state = %{state | raw_magnetometer: {x, y, z}}
+
+          IO.inspect(
+            {x, y, z, status},
+            label: "Raw Magnet"
+          )
+
+        chan == 3 and id == @report_magnetic_field ->
+          {x, y, z} = Sensors.parse_message(:magnetic_field, measurements)
+          state = %{state | magnetic_field: {x, y, z}}
+
+          IO.inspect(
+            {x, y, z, status},
+            label: "Magnetic Field"
+          )
+
+        chan == 3 and id == @report_rotation_vector ->
+          {i, j, k, real, accuracy} = Sensors.parse_message(:rotation_vector, measurements)
+          state = %{state | rotation_vector: {i, j, k, real, accuracy}}
+
+          IO.inspect(
+            {i, j, k, real, accuracy, status},
+            label: "Rotation Vector"
           )
 
         len_lsb == 0 and len_msb == 0 ->
@@ -171,45 +253,45 @@ defmodule Shtp.Shtp do
 
   @impl GenServer
   def handle_cast(
-        {:start_acc, freq},
+        {:start, sensor, freq},
         %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
       ) do
     # start accelerometer reporting
-    Accelerometer.start(i2c, address, Enum.at(sequence, 2), freq)
+    Sensors.start(sensor, i2c, address, Enum.at(sequence, 2), freq)
     {:noreply, %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1)}}
   end
 
-  @impl GenServer
-  def handle_info(:reader, %{i2c: i2c, address: address, sequence: sequence} = state) do
-    with {:ok, data} <- I2C.read(i2c, address, 255) do
-      <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, message::binary>> = data
+  # @impl GenServer
+  # def handle_info(:reader, %{i2c: i2c, address: address, sequence: sequence} = state) do
+  #   with {:ok, data} <- I2C.read(i2c, address, 255) do
+  #     <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, message::binary>> = data
 
-      # If cont bit 1, move on we only care about the first entry, if channel != sensor report, not a measurement
-      if cont_bit == 1 or chan != 3 do
-        IO.inspect(chan, label: "Not a good message")
-        IO.inspect(message)
-        Process.send_after(self(), :reader, 100)
-        {:noreply, state}
-      else
-        IO.inspect("Good message")
-        <<timestamp::binary-5, measurements::binary>> = message
+  #     # If cont bit 1, move on we only care about the first entry, if channel != sensor report, not a measurement
+  #     if cont_bit == 1 or chan != 3 do
+  #       IO.inspect(chan, label: "Not a good message")
+  #       IO.inspect(message)
+  #       Process.send_after(self(), :reader, 100)
+  #       {:noreply, state}
+  #     else
+  #       IO.inspect("Good message")
+  #       <<timestamp::binary-5, measurements::binary>> = message
 
-        <<id::8, sequence::8, status::2, delay::unsigned-little-14,
-          raw_x::signed-little-integer-16, raw_y::signed-little-integer-16,
-          raw_z::signed-little-integer-16, trash::binary>> = measurements
+  #       <<id::8, sequence::8, status::2, delay::unsigned-little-14,
+  #         raw_x::signed-little-integer-16, raw_y::signed-little-integer-16,
+  #         raw_z::signed-little-integer-16, trash::binary>> = measurements
 
-        IO.inspect({raw_x / 256, raw_y / 256, raw_z / 256, label: "acceleration measurements"})
+  #       IO.inspect({raw_x / 256, raw_y / 256, raw_z / 256, label: "acceleration measurements"})
 
-        Process.send_after(self(), :reader, 100)
-        {:noreply, state}
-      end
-    else
-      # If read errors out, try again later
-      _ ->
-        Process.send_after(self(), :reader, 100)
-        {:noreply, state}
-    end
-  end
+  #       Process.send_after(self(), :reader, 100)
+  #       {:noreply, state}
+  #     end
+  #   else
+  #     # If read errors out, try again later
+  #     _ ->
+  #       Process.send_after(self(), :reader, 100)
+  #       {:noreply, state}
+  #   end
+  # end
 
   def reset_device(i2c, address) do
     I2C.write(i2c, address, [<<5>>, <<0>>, <<1>>, <<0>>, <<1>>])
