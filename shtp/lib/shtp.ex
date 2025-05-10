@@ -106,33 +106,8 @@ defmodule Shtp.Shtp do
         :startup,
         %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio_pin} = state
       ) do
-    reset_device(i2c, address)
-
     {:ok, gpio} = GPIO.open(gpio_pin, :input)
     GPIO.set_interrupts(gpio, :falling)
-
-    # Where should sequence counting be handled? ETS?
-
-    data_to_write =
-      produce_id_request(Enum.at(sequence, 2))
-      |> Enum.map(fn x -> if not is_binary(x), do: <<x::8-unsigned-little-integer>>, else: x end)
-
-    I2C.write(i2c, address, data_to_write)
-
-    # test removing this
-    Process.sleep(100)
-
-    {:ok,
-     <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, report_id::8, reset_cause::8,
-       sw_ver_maj::8, sw_ver_min::8, rest::binary>>} = I2C.read(i2c, address, 20)
-
-    <<message_length::unsigned-little-16>> = <<len_lsb, len_msb>>
-
-    IO.inspect({message_length, seq, report_id}, label: "length, seq, report-id: ")
-
-    # sequence = List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1))
-    #
-    Process.sleep(100)
 
     {:noreply, %{state | sequence: sequence, gpio_pin: gpio}}
   end
@@ -261,68 +236,102 @@ defmodule Shtp.Shtp do
     {:noreply, %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1)}}
   end
 
-  # @impl GenServer
-  # def handle_info(:reader, %{i2c: i2c, address: address, sequence: sequence} = state) do
-  #   with {:ok, data} <- I2C.read(i2c, address, 255) do
-  #     <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, message::binary>> = data
+  @impl GenServer
+  def handle_cast(
+        :reset,
+        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
+      ) do
+    reset_device(i2c, address)
+    {:noreply, %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1)}}
+  end
 
-  #     # If cont bit 1, move on we only care about the first entry, if channel != sensor report, not a measurement
-  #     if cont_bit == 1 or chan != 3 do
-  #       IO.inspect(chan, label: "Not a good message")
-  #       IO.inspect(message)
-  #       Process.send_after(self(), :reader, 100)
-  #       {:noreply, state}
-  #     else
-  #       IO.inspect("Good message")
-  #       <<timestamp::binary-5, measurements::binary>> = message
+  def handle_cast(
+        :produce_id,
+        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
+      ) do
+    data_to_write =
+      produce_id_request(Enum.at(sequence, 2))
+      |> Enum.map(fn x -> if not is_binary(x), do: <<x::8-unsigned-little-integer>>, else: x end)
 
-  #       <<id::8, sequence::8, status::2, delay::unsigned-little-14,
-  #         raw_x::signed-little-integer-16, raw_y::signed-little-integer-16,
-  #         raw_z::signed-little-integer-16, trash::binary>> = measurements
+    I2C.write(i2c, address, data_to_write)
+    {:noreply, %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1)}}
+  end
 
-  #       IO.inspect({raw_x / 256, raw_y / 256, raw_z / 256, label: "acceleration measurements"})
+  @impl GenServer
+  def handle_cast(
+        :initialize,
+        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
+      ) do
+    initialize_command =
+      initialize_system(Enum.at(sequence, 2) + 1)
+      |> Enum.map(fn x -> if not is_binary(x), do: <<x::8-unsigned-little-integer>>, else: x end)
 
-  #       Process.send_after(self(), :reader, 100)
-  #       {:noreply, state}
-  #     end
-  #   else
-  #     # If read errors out, try again later
-  #     _ ->
-  #       Process.send_after(self(), :reader, 100)
-  #       {:noreply, state}
-  #   end
-  # end
+    I2C.write(i2c, address, initialize_command)
+    {:noreply, %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1)}}
+  end
+
+  @impl GenServer
+  def handle_cast(
+        :enable_calibration,
+        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
+      ) do
+    enable_calibration =
+      enable_calibration(Enum.at(sequence, 2) + 2)
+      |> Enum.map(fn x -> if not is_binary(x), do: <<x::8-unsigned-little-integer>>, else: x end)
+
+    I2C.write(i2c, address, enable_calibration)
+    {:noreply, %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1)}}
+  end
 
   def reset_device(i2c, address) do
     I2C.write(i2c, address, [<<5>>, <<0>>, <<1>>, <<0>>, <<1>>])
 
-    read_to_zero(i2c, address)
-
     :ok
   end
 
-  def read_to_zero(i2c, address) do
-    Process.sleep(200)
-    message = I2C.read(i2c, address, 20)
+  def enable_calibration(sequence_number) do
+    data = [
+      @report_command_request,
+      0x00,
+      0x07,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00
+    ]
 
-    case message do
-      {:ok, <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>} ->
-        IO.inspect("Done Resetting")
-        :ok
+    IO.inspect("Enable Calibration")
+    send_packet(@channel_device, data, sequence_number)
+  end
 
-      {:ok, response} ->
-        IO.inspect(response, label: "resetting: ")
-        read_to_zero(i2c, address)
+  def initialize_system(sequence_number) do
+    data = [
+      @report_command_request,
+      0x01,
+      0x04,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00
+    ]
 
-      {:error, response} ->
-        IO.inspect(response, label: "resetting: ")
-        :error
-    end
+    IO.inspect("System Initialize")
+    send_packet(@channel_control, data, sequence_number)
   end
 
   def produce_id_request(sequence_number) do
     data = [@report_product_id_request, 0]
-
+    IO.inspect("Produce ID")
     send_packet(@channel_control, data, sequence_number)
   end
 
