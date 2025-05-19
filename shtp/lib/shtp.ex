@@ -104,7 +104,7 @@ defmodule Shtp.Shtp do
   @impl GenServer
   def handle_continue(
         :startup,
-        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio_pin} = state
+        %{sequence: sequence, gpio_pin: gpio_pin} = state
       ) do
     {:ok, gpio} = GPIO.open(gpio_pin, :input)
     GPIO.set_interrupts(gpio, :falling)
@@ -117,6 +117,8 @@ defmodule Shtp.Shtp do
         {:circuits_gpio, pin, timestamp, value},
         %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
       ) do
+    IO.inspect("Got message")
+
     with {:ok, data} <- I2C.read(i2c, address, 255) do
       <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, message::binary>> = data
 
@@ -124,100 +126,112 @@ defmodule Shtp.Shtp do
         measurements::binary>> = message
 
       # If cont bit 1, move on we only care about the first entry, if channel != sensor report, not a measurement
-      cond do
-        cont_bit == 1 or chan != 3 ->
-          IO.inspect(chan, label: "Pin Not a good message")
-          IO.inspect(message)
-          {:noreply, state}
+      state =
+        cond do
+          cont_bit == 1 or chan != 3 ->
+            IO.inspect(chan, label: "Pin Not a good message")
+            IO.inspect(message)
+            state
 
-        chan == 3 and id == @report_accelerometer ->
-          {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
-          state = %{state | accelerometer: {x, y, z}}
+          chan == 3 and id == @report_accelerometer ->
+            {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
 
-          IO.inspect(
-            {x, y, z, (x ** 2 + y ** 2 + z ** 2) ** 0.5, status},
-            label: "Acceleration"
-          )
+            IO.inspect(
+              {x, y, z, (x ** 2 + y ** 2 + z ** 2) ** 0.5, status},
+              label: "Acceleration"
+            )
 
-        chan == 3 and id == @report_raw_accelerometer ->
-          {x, y, z} = Sensors.parse_message(:raw_accelerometer, measurements)
-          state = %{state | raw_accelerometer: {x, y, z}}
+            %{state | accelerometer: {x, y, z}}
 
-          IO.inspect(
-            {x, y, z, status},
-            label: "Raw Acceleration"
-          )
+          chan == 3 and id == @report_raw_accelerometer ->
+            {x, y, z} = Sensors.parse_message(:raw_accelerometer, measurements)
 
-        chan == 3 and id == @report_linear_acceleration ->
-          {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
-          state = %{state | linear_acceleration: {x, y, z}}
+            IO.inspect(
+              {x, y, z, status},
+              label: "Raw Acceleration"
+            )
 
-          IO.inspect(
-            {x, y, z, status},
-            label: "Linear Acceleration"
-          )
+            %{state | raw_accelerometer: {x, y, z}}
 
-        chan == 3 and id == @report_gravity ->
-          {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
-          state = %{state | gravity: {x, y, z}}
+          chan == 3 and id == @report_linear_acceleration ->
+            {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
 
-          IO.inspect(
-            {x, y, z, status},
-            label: "Gravity"
-          )
+            IO.inspect(
+              {x, y, z, status},
+              label: "Linear Acceleration"
+            )
 
-        chan == 3 and id == @report_raw_gyroscope ->
-          {x, y, z, temp} = Sensors.parse_message(:raw_gyroscope, measurements)
-          state = %{state | raw_gyroscope: {x, y, z, temp}}
+            %{state | linear_acceleration: {x, y, z}}
 
-          IO.inspect(
-            {x, y, z, status, temp},
-            label: "Raw Gyroscope"
-          )
+          chan == 3 and id == @report_gravity ->
+            {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
 
-        chan == 3 and id == @report_gyroscope ->
-          {x, y, z} = Sensors.parse_message(:gyroscope, measurements)
-          state = %{state | gyroscope: {x, y, z}}
+            IO.inspect(
+              {x, y, z, status},
+              label: "Gravity"
+            )
 
-          IO.inspect(
-            {x, y, z, status},
-            label: "Gyroscope"
-          )
+            %{state | gravity: {x, y, z}}
 
-        ## skipped uncalibrated gyroscope
-        chan == 3 and id == @report_raw_magnetometer ->
-          {x, y, z} = Sensors.parse_message(:raw_magnetometer, measurements)
-          state = %{state | raw_magnetometer: {x, y, z}}
+          chan == 3 and id == @report_raw_gyroscope ->
+            {x, y, z, temp} = Sensors.parse_message(:raw_gyroscope, measurements)
 
-          IO.inspect(
-            {x, y, z, status},
-            label: "Raw Magnet"
-          )
+            IO.inspect(
+              {x, y, z, status, temp},
+              label: "Raw Gyroscope"
+            )
 
-        chan == 3 and id == @report_magnetic_field ->
-          {x, y, z} = Sensors.parse_message(:magnetic_field, measurements)
-          state = %{state | magnetic_field: {x, y, z}}
+            %{state | raw_gyroscope: {x, y, z, temp}}
 
-          IO.inspect(
-            {x, y, z, status},
-            label: "Magnetic Field"
-          )
+          chan == 3 and id == @report_gyroscope ->
+            {x, y, z} = Sensors.parse_message(:gyroscope, measurements)
 
-        chan == 3 and id == @report_rotation_vector ->
-          {i, j, k, real, accuracy} = Sensors.parse_message(:rotation_vector, measurements)
-          state = %{state | rotation_vector: {i, j, k, real, accuracy}}
+            IO.inspect(
+              {x, y, z, status},
+              label: "Gyroscope"
+            )
 
-          IO.inspect(
-            {i, j, k, real, accuracy, status},
-            label: "Rotation Vector"
-          )
+            %{state | gyroscope: {x, y, z}}
 
-        len_lsb == 0 and len_msb == 0 ->
-          IO.inspect("zero length")
+          ## skipped uncalibrated gyroscope
+          chan == 3 and id == @report_raw_magnetometer ->
+            {x, y, z} = Sensors.parse_message(:raw_magnetometer, measurements)
 
-        true ->
-          IO.inspect(message, label: "Something Else")
-      end
+            IO.inspect(
+              {x, y, z, status},
+              label: "Raw Magnet"
+            )
+
+            %{state | raw_magnetometer: {x, y, z}}
+
+          chan == 3 and id == @report_magnetic_field ->
+            {x, y, z} = Sensors.parse_message(:magnetic_field, measurements)
+
+            IO.inspect(
+              {x, y, z, status},
+              label: "Magnetic Field"
+            )
+
+            %{state | magnetic_field: {x, y, z}}
+
+          chan == 3 and id == @report_rotation_vector ->
+            {i, j, k, real, accuracy} = Sensors.parse_message(:rotation_vector, measurements)
+
+            IO.inspect(
+              {i, j, k, real, accuracy, status},
+              label: "Rotation Vector"
+            )
+
+            %{state | rotation_vector: {i, j, k, real, accuracy}}
+
+          len_lsb == 0 and len_msb == 0 ->
+            IO.inspect("zero length")
+            state
+
+          true ->
+            IO.inspect(message, label: "Something Else")
+            state
+        end
 
       {:noreply, state}
     else
@@ -228,10 +242,21 @@ defmodule Shtp.Shtp do
 
   @impl GenServer
   def handle_cast(
+        :read,
+        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
+      ) do
+    IO.inspect("reading")
+    {:ok, data} = I2C.read(i2c, address, 255)
+    IO.inspect(data, label: "output")
+
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_cast(
         {:start, sensor, freq},
         %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
       ) do
-    # start accelerometer reporting
     Sensors.start(sensor, i2c, address, Enum.at(sequence, 2), freq)
     {:noreply, %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1)}}
   end

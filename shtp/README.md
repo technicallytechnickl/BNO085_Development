@@ -12,4 +12,7 @@ end
 
 # Usage
 
-TBD
+{:ok, pid} = Shtp.Shtp.start_link()
+GenServer.cast(pid, :initialize)
+GenServer.cast(pid, :produce_id)
+GenServer.cast(pid, :initialize)

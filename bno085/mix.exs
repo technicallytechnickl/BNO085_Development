@@ -34,7 +34,9 @@ defmodule Bno085.MixProject do
     [
       {:circuits_i2c, "~>2.1.0"},
       {:cerlc, "~> 0.2.1"},
-      {:ex_doc, "~> 0.37.3", only: :docs}
+      {:ex_doc, "~> 0.37.3", only: :docs},
+      {:phoenix_pubsub, "~> 2.1.3"},
+      {:shtp, path: "../shtp"}
     ]
   end
 
