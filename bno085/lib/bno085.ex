@@ -26,6 +26,7 @@ defmodule Bno085 do
   # API
 
   def start_link([name: name] \\ []) do
+    IO.inspect("Start_Link")
     IO.inspect(name, label: "Name: ")
     IO.inspect(__MODULE__, label: "Module: ")
     :gen_statem.start_link({:global, name}, __MODULE__, [], [])
@@ -33,7 +34,8 @@ defmodule Bno085 do
 
   # Mandatory Callbacks
   def init([]) do
-    {:ok, :idle, []}
+    IO.inspect("init")
+    {:ok, :idle, %{}}
   end
 
   def terminate(reason, _state, _data) do
@@ -44,17 +46,37 @@ defmodule Bno085 do
   # State Callbacks
   # :gen_statem.call({:global, :bno085_proc}, :initialize)
   def idle({:call, from}, :initialize, data) do
-    case GenServer.start_link(Shtp.Shtp, [], name: :bno085_shtp) do
-      {:ok, pid} ->
-        {:next_state, :connected, %{pid: pid}, [{:reply, from, :connected}]}
+    result =
+      case GenServer.start(Shtp.Shtp, [], []) do
+        {:ok, pid} ->
+          IO.inspect("going to connected")
 
-      _ ->
-        {:keep_state, data, [{:reply, from, :idle}]}
-    end
+          {:next_state, :connected, %{pid: pid}, [{:reply, from, :connected}]}
+
+        _ ->
+          {:keep_state, data, [{:reply, from, :idle}]}
+      end
+
+    # {pid, reference} = GenServer.start(Shtp.Shtp, [], [])
+    # IO.inspect(pid, label: "PID: ")
+    # {:next_state, :connected, %{pid: pid, reference: reference}, [{:reply, from, "I replied"}]}
   end
 
-  def connected({:call, from}, _anything, data) do
-    IO.inspect("OK")
-    {:keep_state, data, [{:reply, from, :ok}]}
+  def connected({:call, from}, {:start_sampling, sensor}, data) do
+    IO.inspect(data, label: "Data: ")
+    IO.inspect("starting sample")
+    %{pid: pid} = data
+    result = GenServer.call(pid, {:start, sensor, 1_000_000})
+    {:next_state, :sampling, data, [{:reply, from, {:ok, result}}]}
+  end
+
+  def sampling(:cast, {:accelerometer, values}, data) do
+    IO.inspect(values, label: "I'm sampling here")
+    {:keep_state, data}
+  end
+
+  def sampling(:cast, :read, %{pid: pid} = data) do
+    GenServer.cast(pid, :read)
+    {:keep_state, data}
   end
 end

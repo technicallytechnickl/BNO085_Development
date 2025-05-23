@@ -69,7 +69,8 @@ defmodule Shtp.Shtp do
   @default_i2c_bus_name "i2c-1"
   @default_interrupt_gpio "GPIO4"
 
-  defstruct i2c: @default_i2c_bus_name,
+  defstruct owner: nil,
+            i2c: @default_i2c_bus_name,
             address: 0x00,
             shtp_data_length: 128,
             sequence: [0, 0, 0, 0, 0, 0],
@@ -104,10 +105,13 @@ defmodule Shtp.Shtp do
   @impl GenServer
   def handle_continue(
         :startup,
-        %{sequence: sequence, gpio_pin: gpio_pin} = state
+        %{sequence: sequence, gpio_pin: gpio_pin, address: address, i2c: i2c} = state
       ) do
     {:ok, gpio} = GPIO.open(gpio_pin, :input)
     GPIO.set_interrupts(gpio, :falling)
+
+    # perform read to get pin in proper state
+    _ = I2C.read(i2c, address, 255)
 
     {:noreply, %{state | sequence: sequence, gpio_pin: gpio}}
   end
@@ -115,7 +119,7 @@ defmodule Shtp.Shtp do
   @impl GenServer
   def handle_info(
         {:circuits_gpio, pin, timestamp, value},
-        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
+        %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio, owner: owner} = state
       ) do
     IO.inspect("Got message")
 
@@ -140,6 +144,11 @@ defmodule Shtp.Shtp do
               {x, y, z, (x ** 2 + y ** 2 + z ** 2) ** 0.5, status},
               label: "Acceleration"
             )
+
+            if owner not in [nil] do
+              IO.inspect(owner, label: "owner")
+              GenServer.cast(owner, {:accelerometer, %{x: x, y: y, z: z}})
+            end
 
             %{state | accelerometer: {x, y, z}}
 
@@ -253,12 +262,15 @@ defmodule Shtp.Shtp do
   end
 
   @impl GenServer
-  def handle_cast(
+  def handle_call(
         {:start, sensor, freq},
+        {pid, _ref} = from,
         %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio} = state
       ) do
     Sensors.start(sensor, i2c, address, Enum.at(sequence, 2), freq)
-    {:noreply, %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1)}}
+
+    {:reply, :ok,
+     %{state | sequence: List.replace_at(sequence, 2, Enum.at(sequence, 2) + 1), owner: pid}}
   end
 
   @impl GenServer
