@@ -110,6 +110,8 @@ defmodule Shtp.Shtp do
     {:ok, gpio} = GPIO.open(gpio_pin, :input)
     GPIO.set_interrupts(gpio, :falling)
 
+    reset_device(i2c, address)
+
     # perform read to get pin in proper state
     _ = I2C.read(i2c, address, 255)
 
@@ -121,7 +123,7 @@ defmodule Shtp.Shtp do
         {:circuits_gpio, pin, timestamp, value},
         %{i2c: i2c, address: address, sequence: sequence, gpio_pin: gpio, owner: owner} = state
       ) do
-    IO.inspect("Got message")
+    # IO.inspect("Got message")
 
     with {:ok, data} <- I2C.read(i2c, address, 255) do
       <<len_lsb::8, cont_bit::1, len_msb::7, chan::8, seq::8, message::binary>> = data
@@ -140,10 +142,10 @@ defmodule Shtp.Shtp do
           chan == 3 and id == @report_accelerometer ->
             {x, y, z} = Sensors.parse_message(:accelerometer, measurements)
 
-            IO.inspect(
-              {x, y, z, (x ** 2 + y ** 2 + z ** 2) ** 0.5, status},
-              label: "Acceleration"
-            )
+            # IO.inspect(
+            #   {x, y, z, (x ** 2 + y ** 2 + z ** 2) ** 0.5, status},
+            #   label: "Acceleration"
+            # )
 
             if owner not in [nil] do
               IO.inspect(owner, label: "owner")

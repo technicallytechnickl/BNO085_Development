@@ -2,11 +2,13 @@ defmodule Bno085Development.Application do
   # See https://hexdocs.pm/elixir/Application.html
   # for more information on OTP Applications
   @moduledoc false
-
+  import Bno085Supervisor
   use Application
 
   @impl true
   def start(_type, _args) do
+    Process.sleep(15000)
+
     children =
       [
         # Children for all targets
@@ -34,6 +36,7 @@ defmodule Bno085Development.Application do
   else
     defp target_children() do
       [
+        {Bno085Supervisor, []}
         # Children for all targets except host
         # Starts a worker by calling: Target.Worker.start_link(arg)
         # {Target.Worker, arg},

@@ -10,6 +10,7 @@ defmodule Bno085 do
 
   alias Circuits.I2C
   alias Circuits.GPIO
+  alias Phoenix.PubSub
 
   require Logger
 
@@ -35,6 +36,7 @@ defmodule Bno085 do
   # Mandatory Callbacks
   def init([]) do
     IO.inspect("init")
+
     {:ok, :idle, %{}}
   end
 
@@ -67,16 +69,45 @@ defmodule Bno085 do
     IO.inspect("starting sample")
     %{pid: pid} = data
     result = GenServer.call(pid, {:start, sensor, 1_000_000})
+    data = Map.put(data, sensor, [])
     {:next_state, :sampling, data, [{:reply, from, {:ok, result}}]}
   end
 
-  def sampling(:cast, {:accelerometer, values}, data) do
-    IO.inspect(values, label: "I'm sampling here")
+  def sampling(:cast, {:accelerometer, values}, %{accelerometer: buffer} = data) do
+    data =
+      values
+      |> IO.inspect(label: "I'm sampling here")
+      |> increment_buffer(buffer)
+      |> publish_buffer(:accelerometer)
+      |> update_state(:accelerometer, data)
+
+    # |> IO.inspect(label: "State:")
+
     {:keep_state, data}
   end
 
   def sampling(:cast, :read, %{pid: pid} = data) do
     GenServer.cast(pid, :read)
     {:keep_state, data}
+  end
+
+  defp increment_buffer(value, buffer) do
+    # hardcoded buffer length of 10
+    buffer_len = 10
+
+    if length(buffer) < buffer_len do
+      [{DateTime.utc_now(), value} | buffer]
+    else
+      [{DateTime.utc_now(), value} | List.delete_at(buffer, -1)]
+    end
+  end
+
+  defp publish_buffer(buffer, topic) do
+    PubSub.broadcast(:my_pubsub, Atom.to_string(topic), buffer)
+    buffer
+  end
+
+  defp update_state(value, key, state) do
+    Map.replace(state, key, value)
   end
 end
