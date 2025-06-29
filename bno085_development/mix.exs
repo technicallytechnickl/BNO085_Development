@@ -58,6 +58,7 @@ defmodule Bno085Development.MixProject do
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},
       {:bno085, path: "../bno085", targets: @all_targets},
       {:shtp, path: "../shtp", targets: @all_targets},
+      {:bno085_ui, path: "../bno085_ui", targets: @all_targets},
 
       # Dependencies for specific targets
       # NOTE: It's generally low risk and recommended to follow minor version
