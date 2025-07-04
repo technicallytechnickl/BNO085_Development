@@ -58,7 +58,7 @@ defmodule Bno085UIWeb.DataMonitorWebLive do
     plt =
       Plotex.plot(
         [graph_data],
-        xaxis: [kind: :datetime, ticks: 5, padding: 0.05]
+        xaxis: [kind: :datetime, ticks: 10, padding: 0.05]
       )
 
     # Logger.info("svg plotex cfg: #{inspect(plt, pretty: true)}")

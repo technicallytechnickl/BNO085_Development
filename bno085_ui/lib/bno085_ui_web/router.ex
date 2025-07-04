@@ -19,6 +19,7 @@ defmodule Bno085UIWeb.Router do
     pipe_through(:browser)
     live_dashboard("/dashboard", metrics: Bno085UIWeb.Telemetry)
      live("/plotter", DataMonitorWebLive)
+     live("/better_plotter", BetterDataMonitorWebLive)
     get("/", PageController, :home)
 
   end

@@ -55,7 +55,8 @@ defmodule Bno085UI.MixProject do
       {:bandit, "~> 1.5"},
       {:plug_cowboy, "~> 2.0"},
       {:phoenix_pubsub, "~> 2.1.3"},
-      {:plotex, "~> 0.5.7"}
+      {:plotex, "~> 0.5.7"},
+      {:contex, "~> 0.5.0"}
     ]
   end
 
