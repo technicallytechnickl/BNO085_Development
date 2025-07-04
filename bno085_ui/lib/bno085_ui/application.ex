@@ -8,9 +8,10 @@ defmodule Bno085UI.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      {Phoenix.PubSub, name: :my_pubsub},
       Bno085UIWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:bno085_ui, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Bno085UI.PubSub},
+      Bno085Ui.DataMonitor,
       # Start a worker by calling: Bno085UI.Worker.start_link(arg)
       # {Bno085UI.Worker, arg},
       # Start to serve requests, typically the last entry

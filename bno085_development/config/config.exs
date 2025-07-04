@@ -33,7 +33,7 @@ config :bno085_ui, Bno085UIWeb.Endpoint,
   live_view: [signing_salt: "AAAABjEyERMkxgDh"],
   check_origin: false,
   render_errors: [view: Bno085UIWeb.ErrorView, accepts: ~w(html json), layout: false],
-  pubsub_server: Bno085UIWeb.PubSub,
+  pubsub_server: :my_pubsub,
   # Start the server since we're running in a release instead of through `mix`
   server: true,
   # Nerves root filesystem is read-only, so disable the code reloader

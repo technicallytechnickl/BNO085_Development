@@ -53,7 +53,9 @@ defmodule Bno085UI.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
-      {:plug_cowboy, "~> 2.0"}
+      {:plug_cowboy, "~> 2.0"},
+      {:phoenix_pubsub, "~> 2.1.3"},
+      {:plotex, "~> 0.5.7"}
     ]
   end
 

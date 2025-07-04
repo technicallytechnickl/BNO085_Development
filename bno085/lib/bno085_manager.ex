@@ -34,15 +34,13 @@ defmodule Bno085Manager do
   end
 
   def handle_info(:timeout, state) do
-    IO.inspect("ALIVE")
-    Logger.info("ALIVE LOGGER")
+    # Logger.info("ALIVE LOGGER")
     {:noreply, state, 500}
   end
 
   @impl true
-  def handle_info(msg, state) do
-    IO.inspect({"I'm receiving it", msg})
-    Logger.info("I'm receiving it LOGGER")
+  def handle_info(_msg, state) do
+    # Logger.info("I'm receiving it MANAGER")
     {:noreply, state, 500}
   end
 end

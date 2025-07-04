@@ -9,7 +9,7 @@ defmodule Bno085Supervisor do
   def init(:ok) do
     children = [
       {Bno085, name: :bno085_proc},
-      {Phoenix.PubSub, name: :my_pubsub},
+      # {Phoenix.PubSub, name: :my_pubsub},
       {Bno085Manager, name: :bno085_mgr}
     ]
 

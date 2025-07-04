@@ -19,7 +19,7 @@ config :bno085_ui, Bno085UIWeb.Endpoint,
     formats: [html: Bno085UIWeb.ErrorHTML, json: Bno085UIWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Bno085UI.PubSub,
+  pubsub_server: :my_pubsub,
   live_view: [signing_salt: "u80+XRKJ"]
 
 # Configure esbuild (the version is required)
